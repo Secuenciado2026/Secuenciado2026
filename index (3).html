@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>App Secuenciado Ford</title>
+<style>
+  body { font-family: Arial, sans-serif; margin:0; padding:10px; background:#f2f2f2; }
+  h2 { text-align:center; color:#003478; }
+  .paso { display:none; background:white; border-radius:10px; padding:15px; margin-bottom:10px; box-shadow:0 1px 4px rgba(0,0,0,0.2);}
+  .paso.activo { display:block; }
+  button { background:#003478; color:white; border:none; padding:12px 18px; border-radius:8px; font-size:16px; margin:5px 0; width:100%; }
+  button.secundario { background:#888; }
+  button.quitar { background:#c0392b; width:auto; padding:6px 10px; font-size:13px; }
+  #resultado { text-align:center; font-weight:bold; margin:8px 0; }
+  #reader { width:100%; }
+  ul#listaCarros { list-style:none; padding:0; }
+  ul#listaCarros li { background:#eef; margin:4px 0; padding:8px; border-radius:6px; display:flex; justify-content:space-between; align-items:center; }
+  .badge { display:inline-block; background:#003478; color:white; border-radius:50%; width:26px; height:26px; text-align:center; line-height:26px; margin-right:8px;}
+  .info { background:#fff3cd; padding:8px; border-radius:6px; margin:8px 0; font-size:14px; }
+</style>
+</head>
+<body>
+
+<h2>Secuenciado Ford</h2>
+
+<div id="paso1" class="paso activo">
+  <p><span class="badge">1</span> Escaneá el QR de <b>Inicio de Viaje</b></p>
+  <div id="reader1"></div>
+  <button onclick="iniciarScanner('reader1', procesarInicio)">Escanear QR</button>
+</div>
+
+<div id="paso2" class="paso">
+  <p><span class="badge">2</span> Escaneá el QR del <b>Camión</b></p>
+  <div id="reader2"></div>
+  <button onclick="iniciarScanner('reader2', procesarCamion)">Escanear QR</button>
+</div>
+
+<div id="paso3" class="paso">
+  <p><span class="badge">3</span> Escaneá el QR del <b>Destino</b></p>
+  <div id="reader3"></div>
+  <button onclick="iniciarScanner('reader3', procesarDestino)">Escanear QR</button>
+</div>
+
+<div id="paso4" class="paso">
+  <p><span class="badge">4</span> Escaneá los <b>Carros</b> (uno por uno)</p>
+  <div class="info" id="infoViaje"></div>
+  <div id="reader4"></div>
+  <button onclick="iniciarScanner('reader4', procesarCarro)">Escanear siguiente QR</button>
+  <ul id="listaCarros"></ul>
+  <button class="secundario" onclick="finalizarViaje()">Finalizar y Guardar Viaje</button>
+</div>
+
+<div id="resultado"></div>
+
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+  // =====================================================================
+  // IMPORTANTE: Reemplazá la siguiente URL por la de TU Apps Script
+  // (la que termina en /exec)
+  // =====================================================================
+  var API_URL = "https://script.google.com/macros/s/AKfycbxXj3O-W8tjfnGcgVngqoGDDvBn0Be54MSh42dHlJ30EKbzhvXgp1wh-RUj1B7N03oYSA/exec";
+
+  var maestros = null;
+  var viaje = { camionCodigo:'', camionInfo:'', destinoCodigo:'', destinoInfo:'', destinoFamilia:'', carros: [] };
+  var scannerActivo = null;
+
+  // Cargar maestros desde el Apps Script (API GET)
+  fetch(API_URL + "?action=maestros")
+    .then(function(res){ return res.json(); })
+    .then(function(data){ maestros = data; })
+    .catch(function(err){ mensaje('Error cargando datos: ' + err, false); });
+
+  function mostrarPaso(n){
+    document.querySelectorAll('.paso').forEach(function(p){ p.classList.remove('activo'); });
+    document.getElementById('paso'+n).classList.add('activo');
+  }
+
+  function iniciarScanner(elementId, callback){
+    if (scannerActivo) { scannerActivo.stop().catch(function(){}); }
+    var html5QrCode = new Html5Qrcode(elementId);
+    scannerActivo = html5QrCode;
+    html5QrCode.start(
+      { facingMode: "environment" },
+      { fps: 10, qrbox: 220 },
+      function(decodedText){
+        html5QrCode.stop().then(function(){
+          callback(decodedText.trim());
+        });
+      },
+      function(err){}
+    ).catch(function(err){
+      document.getElementById('resultado').innerText = "No se pudo acceder a la camara: " + err;
+    });
+  }
+
+  function mensaje(txt, ok){
+    var r = document.getElementById('resultado');
+    r.innerText = txt;
+    r.style.color = ok ? 'green' : 'red';
+  }
+
+  function procesarInicio(codigo){
+    if (codigo.toUpperCase().indexOf('INICIO') === -1) {
+      mensaje('QR invalido. Escaneá el QR de Inicio de Viaje.', false);
+      return;
+    }
+    mensaje('Viaje iniciado.', true);
+    mostrarPaso(2);
+  }
+
+  function procesarCamion(codigo){
+    var camion = buscar(maestros.camiones, 'Codigo', codigo);
+    if (!camion){ mensaje('Camion no reconocido: ' + codigo, false); return; }
+    viaje.camionCodigo = codigo;
+    viaje.camionInfo = (camion.Patente||'') + ' - ' + (camion.Chofer||'');
+    mensaje('Camion: ' + viaje.camionInfo, true);
+    mostrarPaso(3);
+  }
+
+  function procesarDestino(codigo){
+    var destino = buscar(maestros.destinos, 'Codigo', codigo);
+    if (!destino){ mensaje('Destino no reconocido: ' + codigo, false); return; }
+    viaje.destinoCodigo = codigo;
+    viaje.destinoInfo = destino.Nombre || codigo;
+    viaje.destinoFamilia = (destino.Familia || destino.Nombre || '').toUpperCase();
+    mensaje('Destino: ' + viaje.destinoInfo, true);
+    document.getElementById('infoViaje').innerText =
+      'Camion: ' + viaje.camionInfo + ' | Destino: ' + viaje.destinoInfo;
+    mostrarPaso(4);
+  }
+
+  function procesarCarro(codigo){
+    var tipo = buscar(maestros.tipos, 'Codigo', codigo);
+    if (!tipo){ mensaje('Carro no reconocido: ' + codigo, false); return; }
+    var familiaCarro = (tipo.Familia || '').toUpperCase();
+    if (familiaCarro !== viaje.destinoFamilia){
+      mensaje('RECHAZADO: el carro ' + codigo + ' es de familia ' + familiaCarro + ', no corresponde al destino ' + viaje.destinoFamilia, false);
+      return;
+    }
+    if (viaje.carros.indexOf(codigo) !== -1){
+      mensaje('Ese carro ya fue escaneado en este viaje.', false);
+      return;
+    }
+    viaje.carros.push(codigo);
+    mensaje('Carro agregado: ' + codigo, true);
+    refrescarLista();
+  }
+
+  function refrescarLista(){
+    var ul = document.getElementById('listaCarros');
+    ul.innerHTML = '';
+    viaje.carros.forEach(function(c, idx){
+      var li = document.createElement('li');
+      li.innerHTML = '<span>' + (idx+1) + '. ' + c + '</span>';
+      var btn = document.createElement('button');
+      btn.className = 'quitar';
+      btn.innerText = 'Quitar';
+      btn.onclick = function(){ viaje.carros.splice(idx,1); refrescarLista(); };
+      li.appendChild(btn);
+      ul.appendChild(li);
+    });
+  }
+
+  function finalizarViaje(){
+    if (viaje.carros.length === 0){ mensaje('Agregá al menos un carro antes de finalizar.', false); return; }
+    fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ action: "guardarViaje", viaje: viaje })
+    })
+      .then(function(res){ return res.json(); })
+      .then(function(res){
+        mensaje('Viaje guardado (' + res.filas + ' carros). Listo para el siguiente viaje.', true);
+        viaje = { camionCodigo:'', camionInfo:'', destinoCodigo:'', destinoInfo:'', destinoFamilia:'', carros: [] };
+        refrescarLista();
+        mostrarPaso(1);
+      })
+      .catch(function(err){ mensaje('Error al guardar: ' + err, false); });
+  }
+
+  function buscar(lista, campo, valor){
+    for (var i=0;i<lista.length;i++){
+      if (String(lista[i][campo]).trim().toUpperCase() === String(valor).trim().toUpperCase()) return lista[i];
+    }
+    return null;
+  }
+</script>
+</body>
+</html>
