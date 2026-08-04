@@ -75,10 +75,14 @@
     function abrirCamara(){
       var html5QrCode = new Html5Qrcode(elementId);
       scannerActivo = html5QrCode;
+      var yaLeido = false;
+
       html5QrCode.start(
         { facingMode: "environment" },
         { fps: 10, qrbox: 220 },
         function(decodedText){
+          if (yaLeido) return;
+          yaLeido = true;
           html5QrCode.stop().then(function(){
             scannerActivo = null;
             callback(decodedText.trim());
@@ -200,4 +204,3 @@
 </script>
 </body>
 </html>
-
