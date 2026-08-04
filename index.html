@@ -55,17 +55,12 @@
 
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script>
-  // =====================================================================
-  // IMPORTANTE: Reemplazá la siguiente URL por la de TU Apps Script
-  // (la que termina en /exec)
-  // =====================================================================
   var API_URL = "https://script.google.com/macros/s/AKfycbxXj3O-W8tjfnGcgVngqoGDDvBn0Be54MSh42dHlJ30EKbzhvXgp1wh-RUj1B7N03oYSA/exec";
 
   var maestros = null;
   var viaje = { camionCodigo:'', camionInfo:'', destinoCodigo:'', destinoInfo:'', destinoFamilia:'', carros: [] };
   var scannerActivo = null;
 
-  // Cargar maestros desde el Apps Script (API GET)
   fetch(API_URL + "?action=maestros")
     .then(function(res){ return res.json(); })
     .then(function(data){ maestros = data; })
@@ -77,21 +72,38 @@
   }
 
   function iniciarScanner(elementId, callback){
-    if (scannerActivo) { scannerActivo.stop().catch(function(){}); }
-    var html5QrCode = new Html5Qrcode(elementId);
-    scannerActivo = html5QrCode;
-    html5QrCode.start(
-      { facingMode: "environment" },
-      { fps: 10, qrbox: 220 },
-      function(decodedText){
-        html5QrCode.stop().then(function(){
-          callback(decodedText.trim());
-        });
-      },
-      function(err){}
-    ).catch(function(err){
-      document.getElementById('resultado').innerText = "No se pudo acceder a la camara: " + err;
-    });
+    function abrirCamara(){
+      var html5QrCode = new Html5Qrcode(elementId);
+      scannerActivo = html5QrCode;
+      html5QrCode.start(
+        { facingMode: "environment" },
+        { fps: 10, qrbox: 220 },
+        function(decodedText){
+          html5QrCode.stop().then(function(){
+            scannerActivo = null;
+            callback(decodedText.trim());
+          }).catch(function(){
+            scannerActivo = null;
+            callback(decodedText.trim());
+          });
+        },
+        function(err){}
+      ).catch(function(err){
+        document.getElementById('resultado').innerText = "No se pudo acceder a la camara: " + err;
+      });
+    }
+
+    if (scannerActivo){
+      scannerActivo.stop().then(function(){
+        scannerActivo = null;
+        setTimeout(abrirCamara, 300);
+      }).catch(function(){
+        scannerActivo = null;
+        setTimeout(abrirCamara, 300);
+      });
+    } else {
+      abrirCamara();
+    }
   }
 
   function mensaje(txt, ok){
@@ -188,3 +200,4 @@
 </script>
 </body>
 </html>
+
