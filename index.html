@@ -13,6 +13,7 @@
   button.secundario { background:#888; }
   button.quitar { background:#c0392b; width:auto; padding:6px 10px; font-size:13px; }
   #resultado { text-align:center; font-weight:bold; margin:8px 0; }
+  #estadoDatos { text-align:center; font-size:13px; padding:6px; margin-bottom:8px; border-radius:6px; background:#eee; color:#555; }
   #reader { width:100%; }
   ul#listaCarros { list-style:none; padding:0; }
   ul#listaCarros li { background:#eef; margin:4px 0; padding:8px; border-radius:6px; display:flex; justify-content:space-between; align-items:center; }
@@ -23,6 +24,7 @@
 <body>
 
 <h2>Secuenciado Ford</h2>
+<div id="estadoDatos" onclick="cargarMaestros()">Cargando datos...</div>
 
 <div id="paso1" class="paso activo">
   <p><span class="badge">1</span> Escaneá el QR de <b>Inicio de Viaje</b></p>
@@ -61,10 +63,31 @@
   var viaje = { camionCodigo:'', camionInfo:'', destinoCodigo:'', destinoInfo:'', destinoFamilia:'', carros: [] };
   var scannerActivo = null;
 
-  fetch(API_URL + "?action=maestros")
-    .then(function(res){ return res.json(); })
-    .then(function(data){ maestros = data; })
-    .catch(function(err){ mensaje('Error cargando datos: ' + err, false); });
+  function cargarMaestros(){
+    var estado = document.getElementById('estadoDatos');
+    estado.innerText = 'Cargando datos...';
+    estado.style.background = '#eee';
+    estado.style.color = '#555';
+
+    fetch(API_URL + "?action=maestros")
+      .then(function(res){ return res.json(); })
+      .then(function(data){
+        maestros = data;
+        var nc = (data.camiones||[]).length;
+        var nd = (data.destinos||[]).length;
+        var nt = (data.tipos||[]).length;
+        estado.innerText = 'Datos listos (Camiones: ' + nc + ', Destinos: ' + nd + ', Tipos: ' + nt + ')';
+        estado.style.background = '#d4edda';
+        estado.style.color = '#155724';
+      })
+      .catch(function(err){
+        estado.innerText = 'Error cargando datos. Tocá aca para reintentar. (' + err + ')';
+        estado.style.background = '#f8d7da';
+        estado.style.color = '#721c24';
+      });
+  }
+
+  cargarMaestros();
 
   function mostrarPaso(n){
     document.querySelectorAll('.paso').forEach(function(p){ p.classList.remove('activo'); });
@@ -85,10 +108,10 @@
           yaLeido = true;
           html5QrCode.stop().then(function(){
             scannerActivo = null;
-            callback(decodedText.trim());
+            procesarConCallback(callback, decodedText.trim());
           }).catch(function(){
             scannerActivo = null;
-            callback(decodedText.trim());
+            procesarConCallback(callback, decodedText.trim());
           });
         },
         function(err){}
@@ -110,6 +133,18 @@
     }
   }
 
+  function procesarConCallback(callback, codigo){
+    try{
+      if (!maestros){
+        mensaje('Los datos todavia no cargaron. Esperá unos segundos y volvé a escanear.', false);
+        return;
+      }
+      callback(codigo);
+    } catch(e){
+      mensaje('Error inesperado: ' + e.message, false);
+    }
+  }
+
   function mensaje(txt, ok){
     var r = document.getElementById('resultado');
     r.innerText = txt;
@@ -127,7 +162,7 @@
 
   function procesarCamion(codigo){
     var camion = buscar(maestros.camiones, 'Codigo', codigo);
-    if (!camion){ mensaje('Camion no reconocido: ' + codigo, false); return; }
+    if (!camion){ mensaje('Camion no reconocido: "' + codigo + '"', false); return; }
     viaje.camionCodigo = codigo;
     viaje.camionInfo = (camion.Patente||'') + ' - ' + (camion.Chofer||'');
     mensaje('Camion: ' + viaje.camionInfo, true);
@@ -136,7 +171,7 @@
 
   function procesarDestino(codigo){
     var destino = buscar(maestros.destinos, 'Codigo', codigo);
-    if (!destino){ mensaje('Destino no reconocido: ' + codigo, false); return; }
+    if (!destino){ mensaje('Destino no reconocido: "' + codigo + '"', false); return; }
     viaje.destinoCodigo = codigo;
     viaje.destinoInfo = destino.Nombre || codigo;
     viaje.destinoFamilia = (destino.Familia || destino.Nombre || '').toUpperCase();
@@ -148,7 +183,7 @@
 
   function procesarCarro(codigo){
     var tipo = buscar(maestros.tipos, 'Codigo', codigo);
-    if (!tipo){ mensaje('Carro no reconocido: ' + codigo, false); return; }
+    if (!tipo){ mensaje('Carro no reconocido: "' + codigo + '"', false); return; }
     var familiaCarro = (tipo.Familia || '').toUpperCase();
     if (familiaCarro !== viaje.destinoFamilia){
       mensaje('RECHAZADO: el carro ' + codigo + ' es de familia ' + familiaCarro + ', no corresponde al destino ' + viaje.destinoFamilia, false);
