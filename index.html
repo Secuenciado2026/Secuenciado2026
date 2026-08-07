@@ -26,26 +26,20 @@
 <h2>Secuenciado Ford</h2>
 <div id="estadoDatos" onclick="cargarMaestros()">Cargando datos...</div>
 
-<div id="paso1" class="paso activo">
-  <p><span class="badge">1</span> Escaneá el QR de <b>Inicio de Viaje</b></p>
-  <div id="reader1"></div>
-  <button onclick="iniciarScanner('reader1', procesarInicio)">Escanear QR</button>
-</div>
-
-<div id="paso2" class="paso">
-  <p><span class="badge">2</span> Escaneá el QR del <b>Camión</b></p>
+<div id="paso2" class="paso activo">
+  <p><span class="badge">1</span> Escaneá el QR del <b>Camión</b></p>
   <div id="reader2"></div>
   <button onclick="iniciarScanner('reader2', procesarCamion)">Escanear QR</button>
 </div>
 
 <div id="paso3" class="paso">
-  <p><span class="badge">3</span> Escaneá el QR del <b>Destino</b></p>
+  <p><span class="badge">2</span> Escaneá el QR del <b>Destino</b></p>
   <div id="reader3"></div>
   <button onclick="iniciarScanner('reader3', procesarDestino)">Escanear QR</button>
 </div>
 
 <div id="paso4" class="paso">
-  <p><span class="badge">4</span> Escaneá los <b>Carros</b> (uno por uno)</p>
+  <p><span class="badge">3</span> Escaneá los <b>Carros</b> (uno por uno)</p>
   <div class="info" id="infoViaje"></div>
   <div id="reader4"></div>
   <button onclick="iniciarScanner('reader4', procesarCarro)">Escanear siguiente QR</button>
@@ -60,8 +54,26 @@
   var API_URL = "https://script.google.com/macros/s/AKfycbxXj3O-W8tjfnGcgVngqoGDDvBn0Be54MSh42dHlJ30EKbzhvXgp1wh-RUj1B7N03oYSA/exec";
 
   var maestros = null;
-  var viaje = { camionCodigo:'', camionInfo:'', destinoCodigo:'', destinoInfo:'', destinoFamilia:'', carros: [] };
   var scannerActivo = null;
+  var viaje = viajeVacio();
+
+  function viajeVacio(){
+    return { camionCodigo:'', camionInfo:'', destinoCodigo:'', destinoInfo:'', destinoFamilia:'', carros: [], fecha:'', hora:'' };
+  }
+
+  function obtenerFechaHoraLocal(){
+    var ahora = new Date();
+    var dd = String(ahora.getDate()).padStart(2,'0');
+    var mm = String(ahora.getMonth()+1).padStart(2,'0');
+    var yyyy = ahora.getFullYear();
+    var hh = String(ahora.getHours()).padStart(2,'0');
+    var mi = String(ahora.getMinutes()).padStart(2,'0');
+    var ss = String(ahora.getSeconds()).padStart(2,'0');
+    return {
+      fecha: dd + '/' + mm + '/' + yyyy,
+      hora: hh + ':' + mi + ':' + ss
+    };
+  }
 
   function cargarMaestros(){
     var estado = document.getElementById('estadoDatos');
@@ -88,6 +100,7 @@
   }
 
   cargarMaestros();
+  mostrarPaso(2);
 
   function mostrarPaso(n){
     document.querySelectorAll('.paso').forEach(function(p){ p.classList.remove('activo'); });
@@ -151,21 +164,17 @@
     r.style.color = ok ? 'green' : 'red';
   }
 
-  function procesarInicio(codigo){
-    if (codigo.toUpperCase().indexOf('INICIO') === -1) {
-      mensaje('QR invalido. Escaneá el QR de Inicio de Viaje.', false);
-      return;
-    }
-    mensaje('Viaje iniciado.', true);
-    mostrarPaso(2);
-  }
-
   function procesarCamion(codigo){
     var camion = buscar(maestros.camiones, 'Codigo', codigo);
     if (!camion){ mensaje('Camion no reconocido: "' + codigo + '"', false); return; }
     viaje.camionCodigo = codigo;
     viaje.camionInfo = (camion.Patente||'') + ' - ' + (camion.Chofer||'');
-    mensaje('Camion: ' + viaje.camionInfo, true);
+
+    var fh = obtenerFechaHoraLocal();
+    viaje.fecha = fh.fecha;
+    viaje.hora = fh.hora;
+
+    mensaje('Camion: ' + viaje.camionInfo + ' | Viaje iniciado ' + viaje.fecha + ' ' + viaje.hora, true);
     mostrarPaso(3);
   }
 
@@ -223,9 +232,9 @@
       .then(function(res){ return res.json(); })
       .then(function(res){
         mensaje('Viaje guardado (' + res.filas + ' carros). Listo para el siguiente viaje.', true);
-        viaje = { camionCodigo:'', camionInfo:'', destinoCodigo:'', destinoInfo:'', destinoFamilia:'', carros: [] };
+        viaje = viajeVacio();
         refrescarLista();
-        mostrarPaso(1);
+        mostrarPaso(2);
       })
       .catch(function(err){ mensaje('Error al guardar: ' + err, false); });
   }
