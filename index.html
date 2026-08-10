@@ -32,14 +32,8 @@
   <button onclick="iniciarScanner('reader2', procesarCamion)">Escanear QR</button>
 </div>
 
-<div id="paso3" class="paso">
-  <p><span class="badge">2</span> Escaneá el QR del <b>Destino</b></p>
-  <div id="reader3"></div>
-  <button onclick="iniciarScanner('reader3', procesarDestino)">Escanear QR</button>
-</div>
-
 <div id="paso4" class="paso">
-  <p><span class="badge">3</span> Escaneá los <b>Carros</b> (uno por uno)</p>
+  <p><span class="badge">2</span> Escaneá los <b>Carros</b> (uno por uno)</p>
   <div class="info" id="infoViaje"></div>
   <div id="reader4"></div>
   <button onclick="iniciarScanner('reader4', procesarCarro)">Escanear siguiente QR</button>
@@ -174,19 +168,13 @@
     viaje.fecha = fh.fecha;
     viaje.hora = fh.hora;
 
-    mensaje('Camion: ' + viaje.camionInfo + ' | Viaje iniciado ' + viaje.fecha + ' ' + viaje.hora, true);
-    mostrarPaso(3);
-  }
+    // El destino todavia no se conoce: se determina con el primer carro escaneado
+    viaje.destinoCodigo = '';
+    viaje.destinoInfo = '';
+    viaje.destinoFamilia = '';
 
-  function procesarDestino(codigo){
-    var destino = buscar(maestros.destinos, 'Codigo', codigo);
-    if (!destino){ mensaje('Destino no reconocido: "' + codigo + '"', false); return; }
-    viaje.destinoCodigo = codigo;
-    viaje.destinoInfo = destino.Nombre || codigo;
-    viaje.destinoFamilia = (destino.Familia || destino.Nombre || '').toUpperCase();
-    mensaje('Destino: ' + viaje.destinoInfo, true);
-    document.getElementById('infoViaje').innerText =
-      'Camion: ' + viaje.camionInfo + ' | Destino: ' + viaje.destinoInfo;
+    mensaje('Camion: ' + viaje.camionInfo + ' | Viaje iniciado ' + viaje.fecha + ' ' + viaje.hora, true);
+    document.getElementById('infoViaje').innerText = 'Camion: ' + viaje.camionInfo + ' | Destino: (se define con el primer carro)';
     mostrarPaso(4);
   }
 
@@ -194,10 +182,24 @@
     var tipo = buscar(maestros.tipos, 'Codigo', codigo);
     if (!tipo){ mensaje('Carro no reconocido: "' + codigo + '"', false); return; }
     var familiaCarro = (tipo.Familia || '').toUpperCase();
-    if (familiaCarro !== viaje.destinoFamilia){
-      mensaje('RECHAZADO: el carro ' + codigo + ' es de familia ' + familiaCarro + ', no corresponde al destino ' + viaje.destinoFamilia, false);
+
+    if (!viaje.destinoFamilia){
+      // Primer carro del viaje: determina el destino automaticamente
+      var destino = buscar(maestros.destinos, 'Nombre', familiaCarro);
+      if (!destino){
+        mensaje('No se encontro un destino para la familia "' + familiaCarro + '". Revisa la hoja Destinos.', false);
+        return;
+      }
+      viaje.destinoCodigo = destino.Codigo;
+      viaje.destinoInfo = destino.Nombre || familiaCarro;
+      viaje.destinoFamilia = familiaCarro;
+      document.getElementById('infoViaje').innerText =
+        'Camion: ' + viaje.camionInfo + ' | Destino: ' + viaje.destinoInfo;
+    } else if (familiaCarro !== viaje.destinoFamilia){
+      mensaje('RECHAZADO: el carro ' + codigo + ' es de familia ' + familiaCarro + ', no corresponde al destino ' + viaje.destinoFamilia + ' de este viaje.', false);
       return;
     }
+
     if (viaje.carros.indexOf(codigo) !== -1){
       mensaje('Ese carro ya fue escaneado en este viaje.', false);
       return;
