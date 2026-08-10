@@ -33,10 +33,9 @@
 </div>
 
 <div id="paso4" class="paso">
-  <p><span class="badge">2</span> Escaneá los <b>Carros</b> (uno por uno)</p>
+  <p><span class="badge">2</span> Escaneá los <b>Carros</b> (la cámara queda abierta, escaneá uno tras otro)</p>
   <div class="info" id="infoViaje"></div>
   <div id="reader4"></div>
-  <button onclick="iniciarScanner('reader4', procesarCarro)">Escanear siguiente QR</button>
   <ul id="listaCarros"></ul>
   <button class="secundario" onclick="finalizarViaje()">Finalizar y Guardar Viaje</button>
 </div>
@@ -49,6 +48,8 @@
 
   var maestros = null;
   var scannerActivo = null;
+  var scannerContinuoActivo = null;
+  var bloqueoLectura = false;
   var viaje = viajeVacio();
 
   function viajeVacio(){
@@ -101,6 +102,7 @@
     document.getElementById('paso'+n).classList.add('activo');
   }
 
+  // Scanner de una sola lectura (se usa para el Camion)
   function iniciarScanner(elementId, callback){
     function abrirCamara(){
       var html5QrCode = new Html5Qrcode(elementId);
@@ -140,6 +142,33 @@
     }
   }
 
+  // Scanner continuo: no se detiene entre lecturas, queda escaneando siempre
+  function iniciarScannerContinuo(elementId, callback){
+    var html5QrCode = new Html5Qrcode(elementId);
+    scannerContinuoActivo = html5QrCode;
+
+    html5QrCode.start(
+      { facingMode: "environment" },
+      { fps: 10, qrbox: 220 },
+      function(decodedText){
+        if (bloqueoLectura) return;
+        bloqueoLectura = true;
+        procesarConCallback(callback, decodedText.trim());
+        setTimeout(function(){ bloqueoLectura = false; }, 1500);
+      },
+      function(err){}
+    ).catch(function(err){
+      document.getElementById('resultado').innerText = "No se pudo acceder a la camara: " + err;
+    });
+  }
+
+  function detenerScannerContinuo(){
+    if (scannerContinuoActivo){
+      scannerContinuoActivo.stop().catch(function(){});
+      scannerContinuoActivo = null;
+    }
+  }
+
   function procesarConCallback(callback, codigo){
     try{
       if (!maestros){
@@ -168,7 +197,6 @@
     viaje.fecha = fh.fecha;
     viaje.hora = fh.hora;
 
-    // El destino todavia no se conoce: se determina con el primer carro escaneado
     viaje.destinoCodigo = '';
     viaje.destinoInfo = '';
     viaje.destinoFamilia = '';
@@ -176,6 +204,7 @@
     mensaje('Camion: ' + viaje.camionInfo + ' | Viaje iniciado ' + viaje.fecha + ' ' + viaje.hora, true);
     document.getElementById('infoViaje').innerText = 'Camion: ' + viaje.camionInfo + ' | Destino: (se define con el primer carro)';
     mostrarPaso(4);
+    iniciarScannerContinuo('reader4', procesarCarro);
   }
 
   function procesarCarro(codigo){
@@ -184,7 +213,6 @@
     var familiaCarro = (tipo.Familia || '').toUpperCase();
 
     if (!viaje.destinoFamilia){
-      // Primer carro del viaje: determina el destino automaticamente
       var destino = buscar(maestros.destinos, 'Nombre', familiaCarro);
       if (!destino){
         mensaje('No se encontro un destino para la familia "' + familiaCarro + '". Revisa la hoja Destinos.', false);
@@ -205,7 +233,7 @@
       return;
     }
     viaje.carros.push(codigo);
-    mensaje('Carro agregado: ' + codigo, true);
+    mensaje('Carro agregado: ' + codigo + ' (' + viaje.carros.length + ')', true);
     refrescarLista();
   }
 
@@ -226,6 +254,7 @@
 
   function finalizarViaje(){
     if (viaje.carros.length === 0){ mensaje('Agregá al menos un carro antes de finalizar.', false); return; }
+    detenerScannerContinuo();
     fetch(API_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
