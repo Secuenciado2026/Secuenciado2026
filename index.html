@@ -11,13 +11,15 @@
   .paso.activo { display:block; }
   button { background:#003478; color:white; border:none; padding:12px 18px; border-radius:8px; font-size:16px; margin:5px 0; width:100%; }
   button.secundario { background:#888; }
+  button.vuelta { background:#1a7a3c; }
   button.quitar { background:#c0392b; width:auto; padding:6px 10px; font-size:13px; }
   #resultado { text-align:center; font-weight:bold; margin:8px 0; }
   #estadoDatos { text-align:center; font-size:13px; padding:6px; margin-bottom:8px; border-radius:6px; background:#eee; color:#555; }
-  #reader { width:100%; }
-  ul#listaCarros { list-style:none; padding:0; }
-  ul#listaCarros li { background:#eef; margin:4px 0; padding:8px; border-radius:6px; display:flex; justify-content:space-between; align-items:center; }
+  #reader, #reader2, #reader4, #reader5 { width:100%; }
+  ul#listaCarros, ul#listaCarrosVuelta { list-style:none; padding:0; }
+  ul#listaCarros li, ul#listaCarrosVuelta li { background:#eef; margin:4px 0; padding:8px; border-radius:6px; display:flex; justify-content:space-between; align-items:center; }
   .badge { display:inline-block; background:#003478; color:white; border-radius:50%; width:26px; height:26px; text-align:center; line-height:26px; margin-right:8px;}
+  .badge.vuelta { background:#1a7a3c; }
   .info { background:#fff3cd; padding:8px; border-radius:6px; margin:8px 0; font-size:14px; }
 </style>
 </head>
@@ -40,6 +42,14 @@
   <button class="secundario" onclick="finalizarViaje()">Finalizar y Guardar Viaje</button>
 </div>
 
+<div id="paso5" class="paso">
+  <p><span class="badge vuelta">V</span> <b>Vuelta detectada.</b> Escaneá los carros vacios que vuelven (opcional)</p>
+  <div class="info" id="infoVuelta"></div>
+  <div id="reader5"></div>
+  <ul id="listaCarrosVuelta"></ul>
+  <button class="vuelta" onclick="finalizarVuelta()">Finalizar Vuelta</button>
+</div>
+
 <div id="resultado"></div>
 
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
@@ -51,9 +61,14 @@
   var scannerContinuoActivo = null;
   var bloqueoLectura = false;
   var viaje = viajeVacio();
+  var vuelta = vueltaVacia();
 
   function viajeVacio(){
     return { camionCodigo:'', camionInfo:'', destinoCodigo:'', destinoInfo:'', destinoFamilia:'', carros: [], fecha:'', hora:'' };
+  }
+
+  function vueltaVacia(){
+    return { camionCodigo:'', camionInfo:'', carros: [], fecha:'', hora:'' };
   }
 
   function obtenerFechaHoraLocal(){
@@ -187,24 +202,53 @@
     r.style.color = ok ? 'green' : 'red';
   }
 
+  // Al escanear el camion, primero se consulta al servidor si tiene
+  // un viaje "Abierto" pendiente. Segun la respuesta, se decide si
+  // es una Salida (paso4) o una Vuelta (paso5).
   function procesarCamion(codigo){
     var camion = buscar(maestros.camiones, 'Codigo', codigo);
     if (!camion){ mensaje('Camion no reconocido: "' + codigo + '"', false); return; }
-    viaje.camionCodigo = codigo;
-    viaje.camionInfo = (camion.Patente||'') + ' - ' + (camion.Chofer||'');
 
-    var fh = obtenerFechaHoraLocal();
-    viaje.fecha = fh.fecha;
-    viaje.hora = fh.hora;
+    var camionInfo = (camion.Patente||'') + ' - ' + (camion.Chofer||'');
+    mensaje('Verificando estado del camion...', true);
 
-    viaje.destinoCodigo = '';
-    viaje.destinoInfo = '';
-    viaje.destinoFamilia = '';
+    fetch(API_URL + "?action=viajeAbierto&codigo=" + encodeURIComponent(codigo))
+      .then(function(res){ return res.json(); })
+      .then(function(data){
+        if (data.abierto){
+          // ----- Es una VUELTA -----
+          vuelta = vueltaVacia();
+          vuelta.camionCodigo = codigo;
+          vuelta.camionInfo = camionInfo;
 
-    mensaje('Camion: ' + viaje.camionInfo + ' | Viaje iniciado ' + viaje.fecha + ' ' + viaje.hora, true);
-    document.getElementById('infoViaje').innerText = 'Camion: ' + viaje.camionInfo + ' | Destino: (se define con el primer carro)';
-    mostrarPaso(4);
-    iniciarScannerContinuo('reader4', procesarCarro);
+          mensaje('Camion: ' + camionInfo + ' | Viaje abierto detectado. Escaneá los carros vacios (o finalizá sin carros).', true);
+          document.getElementById('infoVuelta').innerText =
+            'Camion: ' + camionInfo + ' | Destino de salida: ' + (data.abierto.destinoInfo || '');
+
+          document.getElementById('listaCarrosVuelta').innerHTML = '';
+          mostrarPaso(5);
+          iniciarScannerContinuo('reader5', procesarCarroVuelta);
+
+        } else {
+          // ----- Es una SALIDA -----
+          viaje = viajeVacio();
+          viaje.camionCodigo = codigo;
+          viaje.camionInfo = camionInfo;
+
+          var fh = obtenerFechaHoraLocal();
+          viaje.fecha = fh.fecha;
+          viaje.hora = fh.hora;
+
+          mensaje('Camion: ' + camionInfo + ' | Viaje iniciado ' + viaje.fecha + ' ' + viaje.hora, true);
+          document.getElementById('infoViaje').innerText =
+            'Camion: ' + camionInfo + ' | Destino: (se define con el primer carro)';
+
+          refrescarLista();
+          mostrarPaso(4);
+          iniciarScannerContinuo('reader4', procesarCarro);
+        }
+      })
+      .catch(function(err){ mensaje('Error verificando estado del camion: ' + err, false); });
   }
 
   function procesarCarro(codigo){
@@ -237,6 +281,21 @@
     refrescarLista();
   }
 
+  // Carros vacios que vuelven. Solo se valida que el codigo exista
+  // en TiposCarro; no se compara contra la familia del destino de salida.
+  function procesarCarroVuelta(codigo){
+    var tipo = buscar(maestros.tipos, 'Codigo', codigo);
+    if (!tipo){ mensaje('Carro no reconocido: "' + codigo + '"', false); return; }
+
+    if (vuelta.carros.indexOf(codigo) !== -1){
+      mensaje('Ese carro ya fue escaneado en esta vuelta.', false);
+      return;
+    }
+    vuelta.carros.push(codigo);
+    mensaje('Carro (vuelta) agregado: ' + codigo + ' (' + vuelta.carros.length + ')', true);
+    refrescarListaVuelta();
+  }
+
   function refrescarLista(){
     var ul = document.getElementById('listaCarros');
     ul.innerHTML = '';
@@ -247,6 +306,21 @@
       btn.className = 'quitar';
       btn.innerText = 'Quitar';
       btn.onclick = function(){ viaje.carros.splice(idx,1); refrescarLista(); };
+      li.appendChild(btn);
+      ul.appendChild(li);
+    });
+  }
+
+  function refrescarListaVuelta(){
+    var ul = document.getElementById('listaCarrosVuelta');
+    ul.innerHTML = '';
+    vuelta.carros.forEach(function(c, idx){
+      var li = document.createElement('li');
+      li.innerHTML = '<span>' + (idx+1) + '. ' + c + '</span>';
+      var btn = document.createElement('button');
+      btn.className = 'quitar';
+      btn.innerText = 'Quitar';
+      btn.onclick = function(){ vuelta.carros.splice(idx,1); refrescarListaVuelta(); };
       li.appendChild(btn);
       ul.appendChild(li);
     });
@@ -268,6 +342,34 @@
         mostrarPaso(2);
       })
       .catch(function(err){ mensaje('Error al guardar: ' + err, false); });
+  }
+
+  // Cierra el viaje abierto de este camion. No exige un minimo de
+  // carros: puede finalizar con 0, 1 o mas carros escaneados.
+  function finalizarVuelta(){
+    detenerScannerContinuo();
+
+    var fh = obtenerFechaHoraLocal();
+    vuelta.fecha = fh.fecha;
+    vuelta.hora = fh.hora;
+
+    fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ action: "cerrarViaje", vuelta: vuelta })
+    })
+      .then(function(res){ return res.json(); })
+      .then(function(res){
+        if (!res.ok){
+          mensaje(res.mensaje || 'Error al cerrar el viaje.', false);
+          return;
+        }
+        mensaje('Vuelta registrada (' + res.carros + ' carros). Listo para el siguiente camion.', true);
+        vuelta = vueltaVacia();
+        refrescarListaVuelta();
+        mostrarPaso(2);
+      })
+      .catch(function(err){ mensaje('Error al guardar la vuelta: ' + err, false); });
   }
 
   function buscar(lista, campo, valor){
