@@ -13,7 +13,7 @@
   button.secundario { background:#888; }
   button.vuelta { background:#1a7a3c; }
   button.quitar { background:#c0392b; width:auto; padding:6px 10px; font-size:13px; }
-  #resultado { text-align:center; font-weight:bold; margin:8px 0; }
+  #resultado { text-align:center; font-weight:bold; margin:8px 0; font-size:15px; line-height:1.3; }
   #estadoDatos { text-align:center; font-size:13px; padding:6px; margin-bottom:8px; border-radius:6px; background:#eee; color:#555; }
   #reader, #reader2, #reader4, #reader5 { width:100%; }
   ul#listaCarros, ul#listaCarrosVuelta { list-style:none; padding:0; }
@@ -85,6 +85,51 @@
     };
   }
 
+  function parsearCarro(codigo){
+    var partes = String(codigo || '').trim().split('-');
+    if (partes.length >= 2){
+      var ultimo = partes[partes.length - 1].trim();
+      if (/^\d+$/.test(ultimo)){
+        var num = parseInt(ultimo, 10);
+        var pieza = partes.slice(0, partes.length - 1).join('-').trim().toUpperCase();
+        return { pieza: pieza, numero: num, numStr: ultimo };
+      }
+    }
+    return null;
+  }
+
+  function obtenerUltimoNumeroPieza(pieza){
+    // 1. Busca en los carros ya escaneados en este mismo viaje
+    for (var i = viaje.carros.length - 1; i >= 0; i--){
+      var p = parsearCarro(viaje.carros[i]);
+      if (p && p.pieza === pieza){
+        return p.numero;
+      }
+    }
+    // 2. Busca en los datos historicos recibidos del servidor
+    if (maestros && maestros.ultimosCarros && maestros.ultimosCarros[pieza] !== undefined){
+      return maestros.ultimosCarros[pieza];
+    }
+    // 3. Respaldo local
+    try {
+      var guardados = JSON.parse(localStorage.getItem('ultimosCarros') || '{}');
+      if (guardados[pieza] !== undefined) return guardados[pieza];
+    } catch(e){}
+    return null;
+  }
+
+  function actualizarUltimosCarrosLocales(carrosNuevos){
+    if (!maestros) maestros = {};
+    if (!maestros.ultimosCarros) maestros.ultimosCarros = {};
+    carrosNuevos.forEach(function(c){
+      var p = parsearCarro(c);
+      if (p){ maestros.ultimosCarros[p.pieza] = p.numero; }
+    });
+    try {
+      localStorage.setItem('ultimosCarros', JSON.stringify(maestros.ultimosCarros));
+    } catch(e){}
+  }
+
   function cargarMaestros(){
     var estado = document.getElementById('estadoDatos');
     estado.innerText = 'Cargando datos...';
@@ -98,6 +143,9 @@
         var nc = (data.camiones||[]).length;
         var nd = (data.destinos||[]).length;
         var nt = (data.tipos||[]).length;
+        if (data.ultimosCarros){
+          try { localStorage.setItem('ultimosCarros', JSON.stringify(data.ultimosCarros)); } catch(e){}
+        }
         estado.innerText = 'Datos listos (Camiones: ' + nc + ', Destinos: ' + nd + ', Tipos: ' + nt + ')';
         estado.style.background = '#d4edda';
         estado.style.color = '#155724';
@@ -117,7 +165,6 @@
     document.getElementById('paso'+n).classList.add('activo');
   }
 
-  // Scanner de una sola lectura (se usa para el Camion)
   function iniciarScanner(elementId, callback){
     function abrirCamara(){
       var html5QrCode = new Html5Qrcode(elementId);
@@ -157,7 +204,6 @@
     }
   }
 
-  // Scanner continuo: no se detiene entre lecturas, queda escaneando siempre
   function iniciarScannerContinuo(elementId, callback){
     var html5QrCode = new Html5Qrcode(elementId);
     scannerContinuoActivo = html5QrCode;
@@ -199,12 +245,9 @@
   function mensaje(txt, ok){
     var r = document.getElementById('resultado');
     r.innerText = txt;
-    r.style.color = ok ? 'green' : 'red';
+    r.style.color = ok ? 'green' : '#c0392b';
   }
 
-  // Al escanear el camion, primero se consulta al servidor si tiene
-  // un viaje "Abierto" pendiente. Segun la respuesta, se decide si
-  // es una Salida (paso4) o una Vuelta (paso5).
   function procesarCamion(codigo){
     var camion = buscar(maestros.camiones, 'Codigo', codigo);
     if (!camion){ mensaje('Camion no reconocido: "' + codigo + '"', false); return; }
@@ -216,7 +259,6 @@
       .then(function(res){ return res.json(); })
       .then(function(data){
         if (data.abierto){
-          // ----- Es una VUELTA -----
           vuelta = vueltaVacia();
           vuelta.camionCodigo = codigo;
           vuelta.camionInfo = camionInfo;
@@ -230,7 +272,6 @@
           iniciarScannerContinuo('reader5', procesarCarroVuelta);
 
         } else {
-          // ----- Es una SALIDA -----
           viaje = viajeVacio();
           viaje.camionCodigo = codigo;
           viaje.camionInfo = camionInfo;
@@ -256,6 +297,7 @@
     if (!tipo){ mensaje('Carro no reconocido: "' + codigo + '"', false); return; }
     var familiaCarro = (tipo.Familia || '').toUpperCase();
 
+    // Validacion de Destino
     if (!viaje.destinoFamilia){
       var destino = buscar(maestros.destinos, 'Nombre', familiaCarro);
       if (!destino){
@@ -272,17 +314,38 @@
       return;
     }
 
+    // Validacion de duplicado en el mismo viaje
     if (viaje.carros.indexOf(codigo) !== -1){
       mensaje('Ese carro ya fue escaneado en este viaje.', false);
       return;
     }
+
+    // Validacion de correlatividad y anti-duplicado de ciclo (00 - 99)
+    var info = parsearCarro(codigo);
+    if (info){
+      var ultimo = obtenerUltimoNumeroPieza(info.pieza);
+      if (ultimo !== null){
+        var esperado = (ultimo + 1) % 100;
+        var esperadoStr = String(esperado).padStart(2, '0');
+        var ultimoStr = String(ultimo).padStart(2, '0');
+
+        if (info.numero === ultimo){
+          mensaje('⛔ RECHAZADO: El carro ' + codigo + ' ya fue cargado (DUPLICADO). Se espera el siguiente (' + esperadoStr + ').', false);
+          return;
+        }
+
+        if (info.numero !== esperado){
+          mensaje('⛔ ERROR DE SECUENCIA: Para ' + info.pieza + ' el último fue ' + ultimoStr + '. Debe ser consecutivo: se espera ' + esperadoStr + ' (escaneaste ' + info.numStr + ').', false);
+          return;
+        }
+      }
+    }
+
     viaje.carros.push(codigo);
     mensaje('Carro agregado: ' + codigo + ' (' + viaje.carros.length + ')', true);
     refrescarLista();
   }
 
-  // Carros vacios que vuelven. Solo se valida que el codigo exista
-  // en TiposCarro; no se compara contra la familia del destino de salida.
   function procesarCarroVuelta(codigo){
     var tipo = buscar(maestros.tipos, 'Codigo', codigo);
     if (!tipo){ mensaje('Carro no reconocido: "' + codigo + '"', false); return; }
@@ -329,6 +392,7 @@
   function finalizarViaje(){
     if (viaje.carros.length === 0){ mensaje('Agregá al menos un carro antes de finalizar.', false); return; }
     detenerScannerContinuo();
+    var carrosEnviados = viaje.carros.slice();
     fetch(API_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
@@ -336,6 +400,7 @@
     })
       .then(function(res){ return res.json(); })
       .then(function(res){
+        actualizarUltimosCarrosLocales(carrosEnviados);
         mensaje('Viaje guardado (' + res.filas + ' carros). Listo para el siguiente viaje.', true);
         viaje = viajeVacio();
         refrescarLista();
@@ -344,8 +409,6 @@
       .catch(function(err){ mensaje('Error al guardar: ' + err, false); });
   }
 
-  // Cierra el viaje abierto de este camion. No exige un minimo de
-  // carros: puede finalizar con 0, 1 o mas carros escaneados.
   function finalizarVuelta(){
     detenerScannerContinuo();
 
